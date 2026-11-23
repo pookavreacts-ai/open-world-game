@@ -1,164 +1,229 @@
 
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1,user-scalable=no">
-<title>Mini Open World</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Mini GTA V2</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;overflow:hidden;background:#222;font-family:Arial;color:white}
+body{margin:0;background:#111;color:white;font-family:Arial;overflow:hidden;touch-action:none}
 canvas{display:block}
-#ui{position:fixed;top:10px;left:10px;z-index:5}
-button{background:#222;color:white;border:2px solid white;border-radius:12px;padding:14px;font-size:17px}
-#controls{position:fixed;bottom:20px;width:100%;display:flex;justify-content:space-between;padding:15px;z-index:5}
-.pad{display:grid;grid-template-columns:60px 60px 60px;grid-template-rows:60px 60px 60px;gap:5px}
-.pad button{touch-action:none;padding:0;font-size:24px}
-#action{width:100px;height:100px;border-radius:50%;background:#c62828}
+#hud{position:absolute;top:8px;left:8px;background:#0009;padding:10px;border-radius:12px;font-size:14px}
+#buttons{position:absolute;bottom:12px;left:12px;right:12px;display:flex;justify-content:space-between;align-items:end}
+.pad{display:grid;grid-template-columns:55px 55px 55px;grid-template-rows:55px 55px 55px;gap:5px}
+button{background:#222;color:white;border:2px solid #ddd;border-radius:14px;font-size:22px;touch-action:none}
+.pad button{width:55px;height:55px}
+.action{width:80px;height:80px;border-radius:50%;background:#b71c1c;font-size:14px}
+#attack{background:#7b1fa2}
 </style>
 </head>
 <body>
-<div id="ui">
-  <b>🏙️ MINI CITY</b><br>
-  <span id="score">Mission: Find the car!</span><br>
-  <button onclick="restart()">Restart</button>
+<div id="hud">
+<b>🏙️ MINI GTA V2</b><br>
+<span id="status">Explore the city</span><br>
+❤️ <span id="hp">100</span> | ⭐ <span id="wanted">0</span><br>
+💰 <span id="cash">0</span>
 </div>
-<canvas id="game"></canvas>
-<div id="controls">
-  <div class="pad">
-    <div></div><button data-key="up">⬆️</button><div></div>
-    <button data-key="left">⬅️</button><button data-key="down">⬇️</button><button data-key="right">➡️</button>
-  </div>
-  <button id="action">🚗<br>ENTER</button>
+
+<canvas id="c"></canvas>
+
+<div id="buttons">
+<div class="pad">
+<div></div><button data-k="up">⬆️</button><div></div>
+<button data-k="left">⬅️</button><button data-k="down">⬇️</button><button data-k="right">➡️</button>
 </div>
+<div style="display:flex;gap:8px">
+<button class="action" id="attack">🔫<br>ATTACK</button>
+<button class="action" id="act">🚗<br>ENTER</button>
+</div>
+</div>
+
 <script>
-const canvas=document.getElementById("game");
-const ctx=canvas.getContext("2d");
-function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
-resize();addEventListener("resize",resize);
+const c=document.getElementById('c'),ctx=c.getContext('2d');
+let W,H;
+function resize(){W=c.width=innerWidth;H=c.height=innerHeight}
+resize();addEventListener('resize',resize);
 
-const keys={};
-let player={x:300,y:300};
-let car={x:450,y:300};
-let driving=false,score=0;
-let camera={x:0,y:0};
-const world=2400;
+const WORLD=2400, keys={};
+let player={x:350,y:350,hp:100};
+let car={x:500,y:350,speed:0};
+let inCar=false,wanted=0,cash=0;
+let bullets=[],enemies=[],traffic=[];
+let cam={x:0,y:0};
 
-function restart(){
- player={x:300,y:300};
- car={x:450,y:300};
- driving=false;score=0;
+function rand(a,b){return a+Math.random()*(b-a)}
+
+for(let i=0;i<14;i++){
+ enemies.push({x:rand(100,WORLD-100),y:rand(100,WORLD-100),hp:3});
 }
-addEventListener("keydown",e=>{
+for(let i=0;i<12;i++){
+ traffic.push({
+ x:rand(0,WORLD),y:200+Math.floor(rand(0,6))*400,
+ dir:Math.random()<.5?1:-1,speed:rand(1.5,3),
+ vertical:false,color:['#e53935','#2196f3','#fbc02d','#eeeeee'][i%4]
+ });
+}
+
+addEventListener('keydown',e=>{
  keys[e.key.toLowerCase()]=true;
- if(e.key===" "){e.preventDefault();toggleCar()}
+ if(e.key===' '){e.preventDefault();shoot()}
+ if(e.key.toLowerCase()==='e')interact();
 });
-addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
 
-document.querySelectorAll("[data-key]").forEach(b=>{
- const k=b.dataset.key;
- b.addEventListener("pointerdown",e=>{e.preventDefault();keys[k]=true});
- b.addEventListener("pointerup",()=>keys[k]=false);
- b.addEventListener("pointerleave",()=>keys[k]=false);
- b.addEventListener("pointercancel",()=>keys[k]=false);
+document.querySelectorAll('[data-k]').forEach(b=>{
+ const k=b.dataset.k;
+ b.addEventListener('pointerdown',e=>{e.preventDefault();keys[k]=true});
+ ['pointerup','pointercancel','pointerleave'].forEach(ev=>
+ b.addEventListener(ev,()=>keys[k]=false));
 });
-document.getElementById("action").addEventListener("click",toggleCar);
 
-function toggleCar(){
- let p=driving?car:player;
- if(Math.hypot(player.x-car.x,player.y-car.y)<100 || driving){
-   driving=!driving;
-   document.getElementById("score").innerText=driving?"Driving! Explore the city":"On foot!";
+document.getElementById('act').addEventListener('pointerdown',e=>{
+ e.preventDefault();interact();
+});
+document.getElementById('attack').addEventListener('pointerdown',e=>{
+ e.preventDefault();shoot();
+});
+
+function interact(){
+ if(!inCar && Math.hypot(player.x-car.x,player.y-car.y)<100){
+ inCar=true;
+ document.getElementById('status').innerText='Driving! 🚗';
+ }else if(inCar){
+ inCar=false;player.x=car.x+45;player.y=car.y;
+ document.getElementById('status').innerText='On foot';
+ }
+}
+
+function shoot(){
+ let p=inCar?car:player;
+ let target=null,dist=350;
+ for(let e of enemies){
+ let d=Math.hypot(e.x-p.x,e.y-p.y);
+ if(d<dist){dist=d;target=e}
+ }
+ if(target){
+ target.hp--;
+ wanted=Math.min(5,wanted+1);
+ if(target.hp<=0){
+ enemies.splice(enemies.indexOf(target),1);
+ cash+=10;
+ enemies.push({x:rand(100,WORLD-100),y:rand(100,WORLD-100),hp:3});
+ }
  }
 }
 
 function move(){
- let p=driving?car:player;
- let speed=driving?5:3;
- if(keys.up||keys.w)p.y-=speed;
- if(keys.down||keys.s)p.y+=speed;
- if(keys.left||keys.a)p.x-=speed;
- if(keys.right||keys.d)p.x+=speed;
- p.x=Math.max(20,Math.min(world-20,p.x));
- p.y=Math.max(20,Math.min(world-20,p.y));
- if(driving){player.x=car.x;player.y=car.y}
+ let p=inCar?car:player,s=inCar?4:2.6;
+ if(keys.up||keys.w)p.y-=s;
+ if(keys.down||keys.s)p.y+=s;
+ if(keys.left||keys.a)p.x-=s;
+ if(keys.right||keys.d)p.x+=s;
+ p.x=Math.max(25,Math.min(WORLD-25,p.x));
+ p.y=Math.max(25,Math.min(WORLD-25,p.y));
+ if(inCar){player.x=car.x;player.y=car.y}
 }
 
-function drawCity(){
- ctx.fillStyle="#426b43";
- ctx.fillRect(0,0,world,world);
-
+function city(){
+ ctx.fillStyle='#477447';ctx.fillRect(0,0,WORLD,WORLD);
  // roads
- ctx.fillStyle="#444";
- for(let i=200;i<world;i+=400){
-   ctx.fillRect(i-60,0,120,world);
-   ctx.fillRect(0,i-60,world,120);
+ ctx.fillStyle='#36383b';
+ for(let i=200;i<WORLD;i+=400){
+ ctx.fillRect(i-65,0,130,WORLD);
+ ctx.fillRect(0,i-65,WORLD,130);
  }
- // road markings
- ctx.strokeStyle="#ddd";
- ctx.lineWidth=3;
- ctx.setLineDash([25,25]);
- for(let i=200;i<world;i+=400){
-   ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,world);ctx.stroke();
-   ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(world,i);ctx.stroke();
+ // markings
+ ctx.strokeStyle='#eee';ctx.lineWidth=4;ctx.setLineDash([40,35]);
+ for(let i=200;i<WORLD;i+=400){
+ ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,WORLD);ctx.stroke();
+ ctx.beginPath();ctx.moveTo(0,i);ctx.lineTo(WORLD,i);ctx.stroke();
  }
  ctx.setLineDash([]);
-
- // buildings
- for(let x=40;x<world;x+=400){
-   for(let y=40;y<world;y+=400){
-     if(Math.abs(x%400-200)<50 || Math.abs(y%400-200)<50)continue;
-     ctx.fillStyle="#777";
-     ctx.fillRect(x,y,150,140);
-     ctx.fillStyle="#9b9b9b";
-     ctx.fillRect(x+8,y+8,134,124);
-     ctx.fillStyle="#4e677a";
-     for(let wx=x+20;wx<x+140;wx+=35)
-       for(let wy=y+20;wy<y+125;wy+=35)
-         ctx.fillRect(wx,wy,20,20);
-   }
+ // Buildings
+ for(let x=30;x<WORLD;x+=400){
+ for(let y=30;y<WORLD;y+=400){
+ if((x%400)<130||(y%400)<130)continue;
+ ctx.fillStyle='#666';ctx.fillRect(x,y,210,210);
+ ctx.fillStyle='#858585';ctx.fillRect(x+10,y+10,190,190);
+ ctx.fillStyle='#31546b';
+ for(let a=x+25;a<x+185;a+=45)
+ for(let b=y+25;b<y+185;b+=45)
+ ctx.fillRect(a,b,25,25);
+ // roof detail
+ ctx.fillStyle='#555';ctx.fillRect(x+80,y+80,50,50);
+ }
  }
 }
 
-function draw(){
+function drawCar(x,y,color){
+ ctx.fillStyle='#111';
+ ctx.fillRect(x-22,y-30,8,16);ctx.fillRect(x+14,y-30,8,16);
+ ctx.fillRect(x-22,y+14,8,16);ctx.fillRect(x+14,y+14,8,16);
+ ctx.fillStyle=color;ctx.fillRect(x-20,y-36,40,72);
+ ctx.fillStyle='#a9dcf5';ctx.fillRect(x-14,y-22,28,16);
+ ctx.fillRect(x-14,y+8,28,16);
+ ctx.fillStyle='#eee';ctx.fillRect(x-15,y-34,8,4);ctx.fillRect(x+7,y-34,8,4);
+}
+
+function drawPlayer(x,y){
+ ctx.fillStyle='#ffca80';
+ ctx.beginPath();ctx.arc(x,y-13,12,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle='#1976d2';ctx.fillRect(x-10,y-3,20,25);
+ ctx.fillStyle='#222';ctx.fillRect(x-10,y+18,7,13);ctx.fillRect(x+3,y+18,7,13);
+}
+
+function loop(){
  move();
- camera.x=(driving?car.x:player.x)-canvas.width/2;
- camera.y=(driving?car.y:player.y)-canvas.height/2;
- camera.x=Math.max(0,Math.min(world-canvas.width,camera.x));
- camera.y=Math.max(0,Math.min(world-canvas.height,camera.y));
+ cam.x=Math.max(0,Math.min(WORLD-W,(inCar?car.x:player.x)-W/2));
+ cam.y=Math.max(0,Math.min(WORLD-H,(inCar?car.y:player.y)-H/2));
 
- ctx.clearRect(0,0,canvas.width,canvas.height);
- ctx.save();ctx.translate(-camera.x,-camera.y);
- drawCity();
+ ctx.clearRect(0,0,W,H);ctx.save();ctx.translate(-cam.x,-cam.y);
+ city();
 
- // Mission marker
- ctx.fillStyle="gold";
- ctx.beginPath();ctx.arc(800,800,30,0,Math.PI*2);ctx.fill();
- ctx.fillStyle="black";ctx.font="24px Arial";ctx.fillText("!",790,810);
-
- // Car
- ctx.fillStyle="#e53935";
- ctx.fillRect(car.x-25,car.y-40,50,80);
- ctx.fillStyle="#9dd7ff";
- ctx.fillRect(car.x-17,car.y-25,34,20);
- ctx.fillRect(car.x-17,car.y+10,34,20);
-
- // player
- if(!driving){
-   ctx.fillStyle="#ffcc80";
-   ctx.beginPath();ctx.arc(player.x,player.y-12,12,0,Math.PI*2);ctx.fill();
-   ctx.fillStyle="#1565c0";
-   ctx.fillRect(player.x-10,player.y,20,25);
+ // Traffic
+ for(let t of traffic){
+ t.x+=t.speed*t.dir;
+ if(t.x>WORLD)t.x=0;if(t.x<0)t.x=WORLD;
+ drawCar(t.x,t.y,t.color);
  }
+
+ // Enemies chasing player
+ let p=inCar?car:player;
+ for(let e of enemies){
+ let dx=p.x-e.x,dy=p.y-e.y,d=Math.hypot(dx,dy);
+ if(d<400 && d>1){
+ e.x+=dx/d*0.8;e.y+=dy/d*0.8;
+ }
+ ctx.fillStyle='#d32f2f';
+ ctx.beginPath();ctx.arc(e.x,e.y-10,11,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle='#222';ctx.fillRect(e.x-9,e.y,18,22);
+ if(d<30 && !inCar){
+ player.hp=Math.max(0,player.hp-0.04);
+ if(player.hp<=0){player.hp=100;player.x=350;player.y=350;wanted=0}
+ }
+ }
+
+ // Player and car
+ drawCar(car.x,car.y,'#ef4444');
+ if(!inCar)drawPlayer(player.x,player.y);
+
+ // Bullets
+ bullets.forEach(b=>{
+ b.x+=b.dx;b.y+=b.dy;
+ ctx.fillStyle='#ffeb3b';ctx.beginPath();ctx.arc(b.x,b.y,5,0,Math.PI*2);ctx.fill();
+ });
+ bullets=bullets.filter(b=>b.life-- >0);
+
  ctx.restore();
 
- if(Math.hypot(player.x-800,player.y-800)<60){
- score++;
- document.getElementById("score").innerText="Mission completed! 🎉 Score: "+score;
- }
- requestAnimationFrame(draw);
+ document.getElementById('hp').innerText=Math.floor(player.hp);
+ document.getElementById('wanted').innerText=wanted;
+ document.getElementById('cash').innerText=cash;
+ requestAnimationFrame(loop);
 }
-draw();
+
+loop();
 </script>
 </body>
 </html>
